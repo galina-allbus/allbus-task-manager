@@ -34,7 +34,7 @@ textarea{min-height:110px;resize:vertical}.task{border-top:1px solid #eee;paddin
   <div id="tasks"></div>
   <button id="showAll" class="hidden">← Усі запити</button>
 </section>
-<p class="small">Версія 0.8 · Приватний перегляд конкретного запиту · Останні 300 запитів</p>
+<p class="small">Версія 1.0 · Приватний перегляд конкретного запиту · Останні 300 запитів</p>
 <script>
 (() => {
 'use strict';
@@ -46,7 +46,7 @@ const searchEl=document.getElementById('search'),countEl=document.getElementById
 const listControls=document.getElementById('listControls'),showAll=document.getElementById('showAll');
 const listTitle=document.getElementById('listTitle'),pageTitle=document.getElementById('pageTitle');
 const iframe=document.createElement('iframe');
-let allTasks=[],currentFilter='all',bridgeWindow=null,bridgeOrigin=null,loaded=false;
+let allTasks=[],allPartners=[],currentFilter='all',bridgeWindow=null,bridgeOrigin=null,loaded=false;
 const pending=new Map();
 const rawStart=String(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.start_param||new URLSearchParams(location.search).get('tgWebAppStartParam')||'');
 const match=/^task_([a-zA-Z0-9-]{1,64})$/.exec(rawStart);
@@ -63,8 +63,8 @@ function request(type,fields={}){
  });
 }
 async function refreshTasks(){
- const result=await request('ALLBUS_GET_TASKS');
- allTasks=Array.isArray(result.tasks)?result.tasks:[];
+ const result=await request('ALLBUS_GET_TASKS',{focusedId:focusedTaskId||''});
+ allTasks=Array.isArray(result.tasks)?result.tasks:[];allPartners=Array.isArray(result.partners)?result.partners:[];
  userEl.textContent='Менеджер: '+(result.user&&result.user.name||'—');
  tasksCard.classList.remove('hidden');render();
 }
@@ -90,6 +90,23 @@ function openEditor(item,task,action){
  });
  save.className='primary';controls.append(save,cancel);editor.append(heading,field,controls,notice);item.appendChild(editor);field.focus();
 }
+function openRoutePreview(item,task){
+ const previous=item.querySelector('.editor');if(previous)previous.remove();
+ const panel=document.createElement('div');panel.className='editor';
+ const title=document.createElement('div');title.className='editor-title';title.textContent='Перевірка передачі запиту';
+ const select=document.createElement('select');select.style.width='100%';select.style.padding='12px';
+ allPartners.forEach(p=>{const option=document.createElement('option');option.value=p.key;option.textContent=p.name;select.appendChild(option);});
+ const notice=document.createElement('p');notice.className='notice';
+ const confirm=makeButton('Підтвердити передавання',async()=>{
+   if(!window.confirm('Передати запит партнеру '+select.options[select.selectedIndex].text+'? Це реальна дія.'))return;
+   confirm.disabled=true;btn.disabled=true;
+   try{const res=await request('ALLBUS_ROUTE_SUBMIT',{taskId:String(task.id),targetKey:select.value});notice.textContent=res.message||'Запит додано до черги';notice.className='notice success';}
+   catch(e){notice.textContent=e.message;notice.className='notice error';confirm.disabled=false;btn.disabled=false;}
+ });confirm.className='primary';confirm.disabled=true;
+ select.addEventListener('change',()=>{confirm.disabled=true;notice.textContent='';});
+ const btn=makeButton('Перевірити',async()=>{btn.disabled=true;try{const res=await request('ALLBUS_ROUTE_PREVIEW',{taskId:String(task.id),targetKey:select.value});notice.textContent='Адресат: '+res.target+'\nТекст: '+res.text+'\n'+res.warning;notice.style.whiteSpace='pre-wrap';confirm.disabled=false;}catch(e){notice.textContent=e.message;notice.className='notice error';}finally{btn.disabled=false;}});
+ panel.append(title,select,btn,confirm,notice,makeButton('Закрити',()=>panel.remove()));item.appendChild(panel);
+}
 function render(){
  const focused=Boolean(focusedTaskId);
  listControls.classList.toggle('hidden',focused);showAll.classList.toggle('hidden',!focused);
@@ -114,6 +131,7 @@ function render(){
   const meta=document.createElement('div');meta.className='task-meta';meta.textContent='Відповідальний: '+(task.responsible||'—')+' · Статус: '+(task.status||'—');
   const actions=document.createElement('div');actions.className='actions';
   actions.append(makeButton('✏️ Редагувати',()=>openEditor(item,task,'edit')),makeButton('➕ Додати уточнення',()=>openEditor(item,task,'clarify')));
+  if(!isDone(task.status))actions.append(makeButton('📨 Перевірити передачу',()=>openRoutePreview(item,task)));
   item.append(id,body,meta,actions);tasksEl.appendChild(item);
  }
 }
@@ -137,8 +155,8 @@ window.addEventListener('message',event=>{
  }
  if(!data.requestId||!pending.has(data.requestId))return;
  const entry=pending.get(data.requestId);pending.delete(data.requestId);clearTimeout(entry.timer);
- if(data.type==='ALLBUS_TASKS_RESULT'||data.type==='ALLBUS_UPDATE_RESULT')entry.resolve(data.result||{});
- else if(data.type==='ALLBUS_TASKS_ERROR'||data.type==='ALLBUS_UPDATE_ERROR')entry.reject(new Error(data.message||'Помилка сервера'));
+ if(data.type==='ALLBUS_TASKS_RESULT'||data.type==='ALLBUS_UPDATE_RESULT'||data.type==='ALLBUS_ROUTE_PREVIEW_RESULT'||data.type==='ALLBUS_ROUTE_SUBMIT_RESULT')entry.resolve(data.result||{});
+ else if(data.type==='ALLBUS_TASKS_ERROR'||data.type==='ALLBUS_UPDATE_ERROR'||data.type==='ALLBUS_ROUTE_PREVIEW_ERROR'||data.type==='ALLBUS_ROUTE_SUBMIT_ERROR')entry.reject(new Error(data.message||'Помилка сервера'));
  else entry.reject(new Error('Невідома відповідь сервера'));
 });
 iframe.src=API_URL;document.body.appendChild(iframe);
