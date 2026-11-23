@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="uk">
 <head>
@@ -7,169 +6,132 @@
   <title>ALLBUS Task Manager</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #f5f5f7;
-      color: #202125;
-      margin: 0;
-      padding: 24px 16px;
-    }
-    .card {
-      background: white;
-      border-radius: 18px;
-      padding: 20px;
-      margin-top: 16px;
-    }
-    h1 { font-size: 26px; }
-    h3 { margin-top: 0; }
-    .small { color: #777; font-size: 13px; }
-    #status { font-weight: 600; line-height: 1.6; }
-    .task {
-      border-top: 1px solid #eee;
-      padding: 14px 0;
-    }
-    .task:first-child { border-top: none; }
-    .task-text {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      margin: 10px 0;
-    }
-    .task-id { font-size: 12px; color: #777; }
-    .task-meta { font-size: 13px; color: #555; }
-    .hidden { display: none; }
-    .error { color: #b42318; }
-    .success { color: #16733b; }
+    *{box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f5f7;color:#202125;margin:0;padding:24px 16px}
+    .small{color:#777;font-size:13px}.card{background:white;border-radius:18px;padding:20px;margin-top:16px}
+    h1{font-size:26px;margin:12px 0}h3{margin:0 0 12px}
+    #status{font-weight:600;line-height:1.5}.error{color:#b42318}.success{color:#16733b}
+    .filters{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+    button{border:1px solid #ddd;background:#fff;border-radius:999px;padding:9px 13px;font-size:14px;cursor:pointer}
+    button.active{background:#202125;color:#fff;border-color:#202125}
+    input{width:100%;border:1px solid #ddd;border-radius:12px;padding:12px;font-size:15px}
+    .task{border-top:1px solid #eee;padding:16px 0}.task:first-child{border-top:0}
+    .task-text{white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0;line-height:1.45}
+    .task-meta{font-size:13px;color:#555;line-height:1.7}.task-id{font-size:12px;color:#777}
+    .hidden{display:none}
   </style>
 </head>
 <body>
   <div class="small">ALLBUS · TASK MANAGER</div>
   <h1>Керування запитами</h1>
-
-  <div class="card">
+  <section class="card">
     <h3>Підключення</h3>
     <p id="status">Перевіряємо Telegram...</p>
     <p id="user" class="small"></p>
-  </div>
-
-  <div class="card hidden" id="tasksCard">
-    <h3>Останні запити</h3>
+  </section>
+  <section class="card hidden" id="tasksCard">
+    <h3>Робочі запити <span class="small" id="count"></span></h3>
+    <input id="search" type="search" placeholder="Пошук за текстом, ID, менеджером">
+    <div class="filters">
+      <button class="active" data-filter="all">Усі</button>
+      <button data-filter="pending">Очікують</button>
+      <button data-filter="done">Виконані</button>
+    </div>
     <div id="tasks"></div>
-  </div>
-
-  <p class="small">Тестова версія 0.4 · Перегляд без редагування</p>
-
+  </section>
+  <p class="small">Версія 0.5 · Перегляд без редагування · Останні 300 запитів</p>
   <script>
-    const API_URL =
-      "https://script.google.com/macros/s/AKfycbw7xNwCNg7yTX9mhmIhXeOEKjyIIzLTCJWjD5aPdZx4HO6RXC2_utvoDvk_9warhLoN/exec";
+  (() => {
+    'use strict';
+    const API_URL = 'https://script.google.com/macros/s/AKfycbw7xNwCNg7yTX9mhmIhXeOEKjyIIzLTCJWjD5aPdZx4HO6RXC2_utvoDvk_9warhLoN/exec';
+    const APP_ORIGIN = location.origin;
+    const tg = window.Telegram && window.Telegram.WebApp;
+    const status = document.getElementById('status');
+    const userEl = document.getElementById('user');
+    const tasksCard = document.getElementById('tasksCard');
+    const tasksEl = document.getElementById('tasks');
+    const searchEl = document.getElementById('search');
+    const countEl = document.getElementById('count');
+    const iframe = document.createElement('iframe');
+    const requestId = String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+    let allTasks = [], currentFilter = 'all', finished = false, requested = false;
+    const error = (message) => { status.textContent = message; status.className = 'error'; };
+    const isDone = (value) => /виконано|виконаний|завершено/i.test(String(value || ''));
 
-    const tg = window.Telegram?.WebApp;
-    const statusEl = document.getElementById("status");
-    const userEl = document.getElementById("user");
-    const tasksCard = document.getElementById("tasksCard");
-    const tasksEl = document.getElementById("tasks");
-
-    const requestId =
-      String(Date.now()) + "-" + Math.random().toString(36).slice(2);
-
-    const bridge = document.createElement("iframe");
-    bridge.style.display = "none";
-    bridge.setAttribute("title", "ALLBUS API");
-
-    let completed = false;
-    let bridgeOrigin = null;
-
-    function setError(message) {
-      statusEl.textContent = message;
-      statusEl.className = "error";
-    }
-
-    function renderTasks(result) {
-      completed = true;
-      statusEl.textContent = "Підключення успішне";
-      statusEl.className = "success";
-
-      userEl.textContent =
-        "Користувач: " + (result.user?.name || "Менеджер");
-
-      const tasks = Array.isArray(result.tasks)
-        ? result.tasks
-        : [];
-
+    function render() {
+      const query = searchEl.value.trim().toLocaleLowerCase('uk');
+      const visible = allTasks.filter(task => {
+        const done = isDone(task.status);
+        if (currentFilter === 'done' && !done) return false;
+        if (currentFilter === 'pending' && done) return false;
+        return !query || [task.id,task.text,task.responsible,task.status,task.author]
+          .some(value => String(value || '').toLocaleLowerCase('uk').includes(query));
+      });
+      countEl.textContent = '(' + visible.length + ')';
       tasksEl.replaceChildren();
-      tasksCard.classList.remove("hidden");
-
-      if (tasks.length === 0) {
-        tasksEl.textContent = "Завдань поки немає.";
-        return;
-      }
-
-      for (const task of tasks) {
-        const item = document.createElement("div");
-        item.className = "task";
-
-        const id = document.createElement("div");
-        id.className = "task-id";
-        id.textContent = "ID: " + (task.id || "—");
-
-        const text = document.createElement("div");
-        text.className = "task-text";
-        text.textContent = task.text || "Без тексту";
-
-        const meta = document.createElement("div");
-        meta.className = "task-meta";
-        meta.textContent =
-          "Відповідальний: " + (task.responsible || "—") +
-          " · Статус: " + (task.status || "—");
-
-        item.append(id, text, meta);
-        tasksEl.appendChild(item);
+      if (!visible.length) { tasksEl.textContent = 'За цим фільтром запитів немає.'; return; }
+      for (const task of visible) {
+        const item = document.createElement('div'); item.className = 'task';
+        const id = document.createElement('div'); id.className = 'task-id';
+        id.textContent = 'ID: ' + (task.id || '—') + ' · ' + (task.created || '');
+        const body = document.createElement('div'); body.className = 'task-text';
+        body.textContent = task.text || 'Без тексту';
+        const meta = document.createElement('div'); meta.className = 'task-meta';
+        meta.textContent = 'Відповідальний: ' + (task.responsible || '—') +
+          ' · Статус: ' + (task.status || '—');
+        item.append(id,body,meta); tasksEl.appendChild(item);
       }
     }
+
+    document.querySelectorAll('[data-filter]').forEach(button => {
+      button.addEventListener('click', () => {
+        currentFilter = button.dataset.filter;
+        document.querySelectorAll('[data-filter]').forEach(b => b.classList.toggle('active', b === button));
+        render();
+      });
+    });
+    searchEl.addEventListener('input', render);
 
     if (!tg || !tg.initData) {
-      setError(
-        "Дані авторизації не отримано. Відкрий Mini App через Telegram."
-      );
-    } else {
-      tg.ready();
-      tg.expand();
-
-      statusEl.textContent = "Підключаємося до сервера...";
-
-      window.addEventListener("message", function(event) {
-        if (event.source !== bridge.contentWindow) return;
-
-        // Google Apps Script може завантажувати HTML
-        // через власний домен googleusercontent.com.
-        if (!bridgeOrigin || event.origin !== bridgeOrigin) return;
-
-        const data = event.data;
-
-        if (!data || data.requestId !== requestId) return;
-
-        if (data.type === "ALLBUS_TASKS_RESULT") {
-          renderTasks(data.result || {});
-        }
-
-        if (data.type === "ALLBUS_TASKS_ERROR") {
-          completed = true;
-          setError(
-            "Помилка авторизації або завантаження: " +
-            (data.message || "Невідома помилка")
-          );
-        }
-      });
-
-      bridge.addEventListener("load", function() {
-        // Відправлення запиту до iframe буде налаштовано
-        // після перевірки його фактичного origin.
-        statusEl.textContent =
-          "Сервер завантажено. Перевіряємо канал зв'язку...";
-      });
-
-      bridge.src = API_URL;
-      document.body.appendChild(bridge);
+      error('Дані авторизації відсутні. Відкрийте Mini App через Telegram.');
+      return;
     }
+    tg.ready(); tg.expand();
+    status.textContent = 'З’єднуємося із сервером...';
+    iframe.style.display = 'none';
+    iframe.title = 'ALLBUS API';
+    iframe.setAttribute('referrerpolicy', 'no-referrer');
+
+    window.addEventListener('message', event => {
+      if (event.source !== iframe.contentWindow) return;
+      // Google Apps Script HTMLService may use a sandboxed, opaque origin.
+      // The bridge checks the exact GitHub origin before accepting requests.
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'ALLBUS_BRIDGE_READY' && !requested) {
+        requested = true;
+        status.textContent = 'Перевіряємо доступ і завантажуємо запити...';
+        iframe.contentWindow.postMessage({
+          type:'ALLBUS_GET_TASKS',requestId,initData:tg.initData
+        }, '*');
+        return;
+      }
+      if (data.requestId !== requestId || finished) return;
+      if (data.type === 'ALLBUS_TASKS_ERROR') {
+        finished = true; error('Помилка: ' + (data.message || 'Невідома помилка'));
+      } else if (data.type === 'ALLBUS_TASKS_RESULT') {
+        finished = true;
+        const result = data.result || {};
+        allTasks = Array.isArray(result.tasks) ? result.tasks : [];
+        status.textContent = 'Підключено успішно'; status.className = 'success';
+        userEl.textContent = 'Менеджер: ' + (result.user && result.user.name || '—');
+        tasksCard.classList.remove('hidden'); render();
+      }
+    });
+    iframe.src = API_URL;
+    document.body.appendChild(iframe);
+    setTimeout(() => { if (!finished) error('Сервер не відповів. Перевірте підключення або оновіть Mini App.'); }, 20000);
+  })();
   </script>
 </body>
 </html>
