@@ -72,9 +72,9 @@ function makeButton(label,callback){const b=document.createElement('button');b.t
 function openEditor(item,task,action){
  const previous=item.querySelector('.editor');if(previous)previous.remove();
  const editor=document.createElement('div');editor.className='editor';
- const heading=document.createElement('div');heading.className='editor-title';heading.textContent=action==='edit'?'✏️ Редагувати запит':'➕ Додати уточнення';
+ const heading=document.createElement('div');heading.className='editor-title';heading.textContent=action==='edit'?'✏️ Редагувати запит':'➕ Доповнити';
  const field=document.createElement('textarea');field.maxLength=3500;
- field.placeholder=action==='edit'?'Введіть новий текст запиту':'Напишіть уточнення';
+ field.placeholder=action==='edit'?'Заміна всього тексту':'Додайте нову інформацію, попередня збережеться';
  field.value=action==='edit'?task.text||'':'';
  const controls=document.createElement('div');controls.className='editor-buttons';
  const notice=document.createElement('div');notice.className='notice';
@@ -130,7 +130,7 @@ function render(){
   const body=document.createElement('div');body.className='task-text';body.textContent=task.text||'Без тексту';
   const meta=document.createElement('div');meta.className='task-meta';meta.textContent='Відповідальний: '+(task.responsible||'—')+' · Статус: '+(task.status||'—');
   const actions=document.createElement('div');actions.className='actions';
-  actions.append(makeButton('✏️ Редагувати',()=>openEditor(item,task,'edit')),makeButton('➕ Додати уточнення',()=>openEditor(item,task,'clarify')));
+  actions.append(makeButton('✏️ Редагувати',()=>openEditor(item,task,'edit')),makeButton('➕ Доповнити',()=>openEditor(item,task,'clarify')));
   if(!isDone(task.status))actions.append(makeButton('📨 Перевірити передачу',()=>openRoutePreview(item,task)));
   item.append(id,body,meta,actions);tasksEl.appendChild(item);
  }
