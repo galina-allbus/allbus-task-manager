@@ -1,0 +1,57 @@
+
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ALLBUS Task Manager</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #f5f5f7;
+      color: #202125;
+      margin: 0;
+      padding: 24px 16px;
+    }
+    .card {
+      background: white;
+      border-radius: 18px;
+      padding: 22px;
+      margin-top: 20px;
+    }
+    h1 { font-size: 26px; }
+    .small { color: #777; font-size: 14px; }
+    #status { font-weight: 600; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="small">ALLBUS · TASK MANAGER</div>
+  <h1>Керування запитами</h1>
+  <div class="card">
+    <h3>Перевірка підключення</h3>
+    <p id="status">Перевіряємо Telegram...</p>
+  </div>
+  <p class="small">Тестова версія 0.3. Завдання поки не завантажуються.</p>
+
+  <script>
+    const tg = window.Telegram?.WebApp;
+    const status = document.getElementById("status");
+
+    if (!tg) {
+      status.textContent = "Telegram Web App недоступний.";
+    } else {
+      tg.ready();
+      tg.expand();
+
+      if (tg.initData && tg.initData.length > 0) {
+        status.textContent =
+          "✅ Telegram передав дані авторизації. Очікується перевірка сервером.";
+      } else {
+        status.textContent =
+          "⚠️ Дані авторизації не отримано. Перевірте запуск через Telegram.";
+      }
+    }
+  </script>
+</body>
+</html>
