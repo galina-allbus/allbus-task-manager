@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="uk">
 <head>
@@ -8,27 +9,43 @@
   <style>
     *{box-sizing:border-box}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f5f7;color:#202125;margin:0;padding:24px 16px}
-    .small{color:#777;font-size:13px}.card{background:white;border-radius:18px;padding:20px;margin-top:16px}
-    h1{font-size:26px;margin:12px 0}h3{margin:0 0 12px}
-    #status{font-weight:600;line-height:1.5}.error{color:#b42318}.success{color:#16733b}
+    .small{color:#777;font-size:13px}
+    .card{background:white;border-radius:18px;padding:20px;margin-top:16px}
+    h1{font-size:26px;margin:12px 0}
+    h3{margin:0 0 12px}
+    #status{font-weight:600;line-height:1.5}
+    .error{color:#b42318}
+    .success{color:#16733b}
     .filters{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
     button{border:1px solid #ddd;background:#fff;border-radius:999px;padding:9px 13px;font-size:14px;cursor:pointer}
     button.active{background:#202125;color:#fff;border-color:#202125}
-    input{width:100%;border:1px solid #ddd;border-radius:12px;padding:12px;font-size:15px}
-    .task{border-top:1px solid #eee;padding:16px 0}.task:first-child{border-top:0}
+    button:disabled{opacity:.5;cursor:wait}
+    input,textarea{width:100%;border:1px solid #ddd;border-radius:12px;padding:12px;font-size:15px;font-family:inherit}
+    textarea{min-height:110px;resize:vertical}
+    .task{border-top:1px solid #eee;padding:16px 0}
+    .task:first-child{border-top:0}
     .task-text{white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0;line-height:1.45}
-    .task-meta{font-size:13px;color:#555;line-height:1.7}.task-id{font-size:12px;color:#777}
+    .task-meta{font-size:13px;color:#555;line-height:1.7}
+    .task-id{font-size:12px;color:#777}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    .editor{margin-top:12px;padding:14px;background:#f5f5f7;border-radius:14px}
+    .editor-title{font-weight:600;margin-bottom:10px}
+    .editor-buttons{display:flex;gap:8px;margin-top:10px}
+    .primary{background:#202125;color:white;border-color:#202125}
+    .notice{font-size:13px;margin-top:8px}
     .hidden{display:none}
   </style>
 </head>
 <body>
   <div class="small">ALLBUS · TASK MANAGER</div>
   <h1>Керування запитами</h1>
+
   <section class="card">
     <h3>Підключення</h3>
     <p id="status">Перевіряємо Telegram...</p>
     <p id="user" class="small"></p>
   </section>
+
   <section class="card hidden" id="tasksCard">
     <h3>Робочі запити <span class="small" id="count"></span></h3>
     <input id="search" type="search" placeholder="Пошук за текстом, ID, менеджером">
@@ -39,12 +56,15 @@
     </div>
     <div id="tasks"></div>
   </section>
-  <p class="small">Версія 0.6 · Перегляд без редагування · Останні 300 запитів</p>
+
+  <p class="small">Версія 0.7 · Редагування та уточнення · Останні 300 запитів</p>
+
   <script>
   (() => {
     'use strict';
+
     const API_URL = 'https://script.google.com/macros/s/AKfycbw7xNwCNg7yTX9mhmIhXeOEKjyIIzLTCJWjD5aPdZx4HO6RXC2_utvoDvk_9warhLoN/exec';
-    const APP_ORIGIN = location.origin;
+
     const tg = window.Telegram && window.Telegram.WebApp;
     const status = document.getElementById('status');
     const userEl = document.getElementById('user');
@@ -52,88 +72,279 @@
     const tasksEl = document.getElementById('tasks');
     const searchEl = document.getElementById('search');
     const countEl = document.getElementById('count');
+
     const iframe = document.createElement('iframe');
-    const requestId = String(Date.now()) + '-' + Math.random().toString(36).slice(2);
-    let allTasks = [], currentFilter = 'all', finished = false, requested = false;
-    let stage = 'Очікуємо сигнал від Bridge';
-    const error = (message) => { status.textContent = message; status.className = 'error'; };
-    const isDone = (value) => /виконано|виконаний|завершено/i.test(String(value || ''));
+
+    let allTasks = [];
+    let currentFilter = 'all';
+    let bridgeWindow = null;
+    let bridgeOrigin = null;
+    let loaded = false;
+    let pending = new Map();
+
+    const isDone = value =>
+      /виконано|виконаний|завершено/i.test(String(value || ''));
+
+    const error = message => {
+      status.textContent = message;
+      status.className = 'error';
+    };
+
+    function request(type, fields = {}) {
+      return new Promise((resolve, reject) => {
+        if (!bridgeWindow || !bridgeOrigin) {
+          reject(new Error('Немає зв’язку із сервером'));
+          return;
+        }
+
+        const requestId = String(Date.now()) + '-' +
+          Math.random().toString(36).slice(2);
+
+        const timer = setTimeout(() => {
+          pending.delete(requestId);
+          reject(new Error('Сервер не відповів за 30 секунд'));
+        }, 30000);
+
+        pending.set(requestId, {resolve, reject, timer});
+
+        bridgeWindow.postMessage({
+          type,
+          requestId,
+          initData: tg.initData,
+          ...fields
+        }, bridgeOrigin);
+      });
+    }
+
+    async function refreshTasks() {
+      const result = await request('ALLBUS_GET_TASKS');
+      allTasks = Array.isArray(result.tasks) ? result.tasks : [];
+      userEl.textContent = 'Менеджер: ' +
+        (result.user && result.user.name || '—');
+      tasksCard.classList.remove('hidden');
+      render();
+    }
+
+    function makeButton(label, callback) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.addEventListener('click', callback);
+      return button;
+    }
+
+    function openEditor(item, task, action) {
+      const previous = item.querySelector('.editor');
+      if (previous) previous.remove();
+
+      const editor = document.createElement('div');
+      editor.className = 'editor';
+
+      const heading = document.createElement('div');
+      heading.className = 'editor-title';
+      heading.textContent = action === 'edit'
+        ? '✏️ Редагувати запит'
+        : '➕ Додати уточнення';
+
+      const field = document.createElement('textarea');
+      field.maxLength = 3500;
+      field.placeholder = action === 'edit'
+        ? 'Введіть новий текст запиту'
+        : 'Напишіть уточнення';
+      field.value = action === 'edit' ? task.text || '' : '';
+
+      const controls = document.createElement('div');
+      controls.className = 'editor-buttons';
+
+      const save = makeButton('Зберегти', async () => {
+        const text = field.value.trim();
+
+        if (!text) {
+          notice.textContent = 'Введіть текст';
+          notice.className = 'notice error';
+          return;
+        }
+
+        save.disabled = true;
+        cancel.disabled = true;
+        notice.textContent = 'Зберігаємо...';
+        notice.className = 'notice';
+
+        try {
+          await request('ALLBUS_UPDATE_TASK', {
+            taskId: String(task.id),
+            action,
+            text
+          });
+
+          notice.textContent = 'Зміни збережено';
+          notice.className = 'notice success';
+          await refreshTasks();
+        } catch (err) {
+          notice.textContent = 'Помилка: ' + err.message;
+          notice.className = 'notice error';
+        } finally {
+          save.disabled = false;
+          cancel.disabled = false;
+        }
+      });
+
+      save.className = 'primary';
+
+      const cancel = makeButton('Скасувати', () => editor.remove());
+
+      const notice = document.createElement('div');
+      notice.className = 'notice';
+
+      controls.append(save, cancel);
+      editor.append(heading, field, controls, notice);
+      item.appendChild(editor);
+      field.focus();
+    }
 
     function render() {
       const query = searchEl.value.trim().toLocaleLowerCase('uk');
+
       const visible = allTasks.filter(task => {
         const done = isDone(task.status);
+
         if (currentFilter === 'done' && !done) return false;
         if (currentFilter === 'pending' && done) return false;
-        return !query || [task.id,task.text,task.responsible,task.status,task.author]
-          .some(value => String(value || '').toLocaleLowerCase('uk').includes(query));
+
+        return !query || [
+          task.id, task.text, task.responsible,
+          task.status, task.author
+        ].some(value =>
+          String(value || '').toLocaleLowerCase('uk').includes(query)
+        );
       });
+
       countEl.textContent = '(' + visible.length + ')';
       tasksEl.replaceChildren();
-      if (!visible.length) { tasksEl.textContent = 'За цим фільтром запитів немає.'; return; }
+
+      if (!visible.length) {
+        tasksEl.textContent = 'За цим фільтром запитів немає.';
+        return;
+      }
+
       for (const task of visible) {
-        const item = document.createElement('div'); item.className = 'task';
-        const id = document.createElement('div'); id.className = 'task-id';
-        id.textContent = 'ID: ' + (task.id || '—') + ' · ' + (task.created || '');
-        const body = document.createElement('div'); body.className = 'task-text';
+        const item = document.createElement('div');
+        item.className = 'task';
+
+        const id = document.createElement('div');
+        id.className = 'task-id';
+        id.textContent = 'ID: ' + (task.id || '—') +
+          ' · ' + (task.created || '');
+
+        const body = document.createElement('div');
+        body.className = 'task-text';
         body.textContent = task.text || 'Без тексту';
-        const meta = document.createElement('div'); meta.className = 'task-meta';
-        meta.textContent = 'Відповідальний: ' + (task.responsible || '—') +
+
+        const meta = document.createElement('div');
+        meta.className = 'task-meta';
+        meta.textContent = 'Відповідальний: ' +
+          (task.responsible || '—') +
           ' · Статус: ' + (task.status || '—');
-        item.append(id,body,meta); tasksEl.appendChild(item);
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+
+        actions.append(
+          makeButton('✏️ Редагувати', () =>
+            openEditor(item, task, 'edit')
+          ),
+          makeButton('➕ Додати уточнення', () =>
+            openEditor(item, task, 'clarify')
+          )
+        );
+
+        item.append(id, body, meta, actions);
+        tasksEl.appendChild(item);
       }
     }
 
     document.querySelectorAll('[data-filter]').forEach(button => {
       button.addEventListener('click', () => {
         currentFilter = button.dataset.filter;
-        document.querySelectorAll('[data-filter]').forEach(b => b.classList.toggle('active', b === button));
+
+        document.querySelectorAll('[data-filter]').forEach(b =>
+          b.classList.toggle('active', b === button)
+        );
+
         render();
       });
     });
+
     searchEl.addEventListener('input', render);
 
     if (!tg || !tg.initData) {
       error('Дані авторизації відсутні. Відкрийте Mini App через Telegram.');
       return;
     }
-    tg.ready(); tg.expand();
+
+    tg.ready();
+    tg.expand();
+
     status.textContent = 'З’єднуємося із сервером...';
+
     iframe.style.display = 'none';
     iframe.title = 'ALLBUS API';
     iframe.setAttribute('referrerpolicy', 'no-referrer');
 
     window.addEventListener('message', event => {
-      // HTMLService adds an internal iframe: the message comes from that inner window.
-      // Accept only Google's HTMLService hosting origin, never arbitrary websites.
-      const trusted = /^https:\/\/[a-z0-9.-]*googleusercontent\.com$/i.test(event.origin);
+      const trusted =
+        /^https:\/\/[a-z0-9.-]*googleusercontent\.com$/i.test(event.origin);
+
       if (!trusted) return;
+
       const data = event.data;
       if (!data || typeof data !== 'object') return;
-      if (data.type === 'ALLBUS_BRIDGE_READY' && !requested) {
-        requested = true;
-        stage = 'Bridge відповів, очікуємо перевірку Telegram';
-        status.textContent = 'Перевіряємо доступ і завантажуємо запити...';
-        event.source.postMessage({
-          type:'ALLBUS_GET_TASKS',requestId,initData:tg.initData
-        }, event.origin);
+
+      if (data.type === 'ALLBUS_BRIDGE_READY') {
+        if (!bridgeWindow) {
+          bridgeWindow = event.source;
+          bridgeOrigin = event.origin;
+
+          status.textContent = 'Перевіряємо доступ і завантажуємо запити...';
+
+          refreshTasks().then(() => {
+            loaded = true;
+            status.textContent = 'Підключено успішно';
+            status.className = 'success';
+          }).catch(err => {
+            error('Помилка: ' + err.message);
+          });
+        }
         return;
       }
-      if (data.requestId !== requestId || finished) return;
-      if (data.type === 'ALLBUS_TASKS_ERROR') {
-        finished = true; error('Помилка: ' + (data.message || 'Невідома помилка'));
-      } else if (data.type === 'ALLBUS_TASKS_RESULT') {
-        finished = true;
-        const result = data.result || {};
-        allTasks = Array.isArray(result.tasks) ? result.tasks : [];
-        status.textContent = 'Підключено успішно'; status.className = 'success';
-        userEl.textContent = 'Менеджер: ' + (result.user && result.user.name || '—');
-        tasksCard.classList.remove('hidden'); render();
+
+      if (!data.requestId || !pending.has(data.requestId)) return;
+
+      const entry = pending.get(data.requestId);
+      pending.delete(data.requestId);
+      clearTimeout(entry.timer);
+
+      if (
+        data.type === 'ALLBUS_TASKS_RESULT' ||
+        data.type === 'ALLBUS_UPDATE_RESULT'
+      ) {
+        entry.resolve(data.result || {});
+      } else if (
+        data.type === 'ALLBUS_TASKS_ERROR' ||
+        data.type === 'ALLBUS_UPDATE_ERROR'
+      ) {
+        entry.reject(new Error(data.message || 'Помилка сервера'));
       }
     });
+
     iframe.src = API_URL;
     document.body.appendChild(iframe);
-    setTimeout(() => { if (!finished) error('Час очікування вичерпано. Етап: ' + stage + '.'); }, 20000);
+
+    setTimeout(() => {
+      if (!loaded) {
+        error('Не вдалося завантажити запити. Перевірте підключення.');
+      }
+    }, 35000);
   })();
   </script>
 </body>
