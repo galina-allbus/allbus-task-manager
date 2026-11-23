@@ -39,7 +39,7 @@
     </div>
     <div id="tasks"></div>
   </section>
-  <p class="small">Версія 0.5 · Перегляд без редагування · Останні 300 запитів</p>
+  <p class="small">Версія 0.6 · Перегляд без редагування · Останні 300 запитів</p>
   <script>
   (() => {
     'use strict';
@@ -55,6 +55,7 @@
     const iframe = document.createElement('iframe');
     const requestId = String(Date.now()) + '-' + Math.random().toString(36).slice(2);
     let allTasks = [], currentFilter = 'all', finished = false, requested = false;
+    let stage = 'Очікуємо сигнал від Bridge';
     const error = (message) => { status.textContent = message; status.className = 'error'; };
     const isDone = (value) => /виконано|виконаний|завершено/i.test(String(value || ''));
 
@@ -103,17 +104,19 @@
     iframe.setAttribute('referrerpolicy', 'no-referrer');
 
     window.addEventListener('message', event => {
-      if (event.source !== iframe.contentWindow) return;
-      // Google Apps Script HTMLService may use a sandboxed, opaque origin.
-      // The bridge checks the exact GitHub origin before accepting requests.
+      // HTMLService adds an internal iframe: the message comes from that inner window.
+      // Accept only Google's HTMLService hosting origin, never arbitrary websites.
+      const trusted = /^https:\/\/[a-z0-9.-]*googleusercontent\.com$/i.test(event.origin);
+      if (!trusted) return;
       const data = event.data;
       if (!data || typeof data !== 'object') return;
       if (data.type === 'ALLBUS_BRIDGE_READY' && !requested) {
         requested = true;
+        stage = 'Bridge відповів, очікуємо перевірку Telegram';
         status.textContent = 'Перевіряємо доступ і завантажуємо запити...';
-        iframe.contentWindow.postMessage({
+        event.source.postMessage({
           type:'ALLBUS_GET_TASKS',requestId,initData:tg.initData
-        }, '*');
+        }, event.origin);
         return;
       }
       if (data.requestId !== requestId || finished) return;
@@ -130,7 +133,7 @@
     });
     iframe.src = API_URL;
     document.body.appendChild(iframe);
-    setTimeout(() => { if (!finished) error('Сервер не відповів. Перевірте підключення або оновіть Mini App.'); }, 20000);
+    setTimeout(() => { if (!finished) error('Час очікування вичерпано. Етап: ' + stage + '.'); }, 20000);
   })();
   </script>
 </body>
