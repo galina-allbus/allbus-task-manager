@@ -51,6 +51,8 @@ const pending=new Map();
 const rawStart=String(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.start_param||new URLSearchParams(location.search).get('tgWebAppStartParam')||'');
 const match=/^task_([a-zA-Z0-9-]{1,64})$/.exec(rawStart);
 let focusedTaskId=match?match[1]:null;
+const draftMatch=/^draft_([a-f0-9]{20})$/.exec(rawStart);
+async function loadDraft47(){const d=await request('ALLBUS_DRAFT_GET',{draftId:draftMatch[1]});tasksCard.classList.remove('hidden');listControls.classList.add('hidden');pageTitle.textContent='Редагування пересланого';listTitle.textContent='Чернетка · фото: '+d.photos;const field=document.createElement('textarea');field.value=d.text;field.maxLength=1200;const notice=document.createElement('p');const save=makeButton('Зберегти текст',async()=>{save.disabled=true;try{const r=await request('ALLBUS_DRAFT_SAVE',{draftId:draftMatch[1],text:field.value,version:d.version});notice.textContent=r.message;tasksEl.append(makeButton('Повернутися до Telegram',()=>tg.close()));}catch(e){notice.textContent=e.message;save.disabled=false;}});tasksEl.replaceChildren(field,save,notice);}
 const isDone=value=>/виконано|виконаний|завершено/i.test(String(value||''));
 const showError=message=>{status.textContent=message;status.className='error';};
 function request(type,fields={}){
@@ -150,13 +152,13 @@ window.addEventListener('message',event=>{
  if(data.type==='ALLBUS_BRIDGE_READY'){
   if(!bridgeWindow){bridgeWindow=event.source;bridgeOrigin=event.origin;
    status.textContent='Перевіряємо доступ і завантажуємо запити...';
-   refreshTasks().then(()=>{loaded=true;status.textContent='Підключено успішно';status.className='success';}).catch(err=>showError('Помилка: '+err.message));
+   (draftMatch?loadDraft47():refreshTasks()).then(()=>{loaded=true;status.textContent='Підключено успішно';status.className='success';}).catch(err=>showError('Помилка: '+err.message));
   }return;
  }
  if(!data.requestId||!pending.has(data.requestId))return;
  const entry=pending.get(data.requestId);pending.delete(data.requestId);clearTimeout(entry.timer);
- if(data.type==='ALLBUS_TASKS_RESULT'||data.type==='ALLBUS_UPDATE_RESULT'||data.type==='ALLBUS_ROUTE_PREVIEW_RESULT'||data.type==='ALLBUS_ROUTE_SUBMIT_RESULT')entry.resolve(data.result||{});
- else if(data.type==='ALLBUS_TASKS_ERROR'||data.type==='ALLBUS_UPDATE_ERROR'||data.type==='ALLBUS_ROUTE_PREVIEW_ERROR'||data.type==='ALLBUS_ROUTE_SUBMIT_ERROR')entry.reject(new Error(data.message||'Помилка сервера'));
+ if(data.type==='ALLBUS_DRAFT_GET_RESULT'||data.type==='ALLBUS_DRAFT_SAVE_RESULT'||data.type==='ALLBUS_TASKS_RESULT'||data.type==='ALLBUS_UPDATE_RESULT'||data.type==='ALLBUS_ROUTE_PREVIEW_RESULT'||data.type==='ALLBUS_ROUTE_SUBMIT_RESULT')entry.resolve(data.result||{});
+ else if(data.type==='ALLBUS_DRAFT_GET_ERROR'||data.type==='ALLBUS_DRAFT_SAVE_ERROR'||data.type==='ALLBUS_TASKS_ERROR'||data.type==='ALLBUS_UPDATE_ERROR'||data.type==='ALLBUS_ROUTE_PREVIEW_ERROR'||data.type==='ALLBUS_ROUTE_SUBMIT_ERROR')entry.reject(new Error(data.message||'Помилка сервера'));
  else entry.reject(new Error('Невідома відповідь сервера'));
 });
 iframe.src=API_URL;document.body.appendChild(iframe);
